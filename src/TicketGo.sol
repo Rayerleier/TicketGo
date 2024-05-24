@@ -6,6 +6,18 @@ import {AggregatorV3Interface} from "foundry-chainlink-toolkit/src/interfaces/fe
 contract TicketGo {
     AggregatorV3Interface internal dataFeed;
 
+    address public _operator;
+    address public _ticketProvider;
+
+    struct Spectator {
+        address _address;
+        uint256 id;
+        uint256 amount;
+        string[] ticketLeavel;
+    }
+
+    address[] public activityPool;
+
     /**
      * Network: Sepolia
      * Aggregator: ETH/USD
