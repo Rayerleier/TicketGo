@@ -7,13 +7,32 @@ contract TicketGo {
     AggregatorV3Interface internal dataFeed;
 
     address public _operator;
-    address public _ticketProvider;
+    // address public _ticketProvider;
+    Concert[] ConcertList;  
+    mapping(uint256 conertId=>uint256 amount) balancesOfConcert;  // conertId=>
+    uint256 private conertId;  // unique Id of conert
+    mapping(uint256=>Concert) concertIdOf;  // query conert info using concertId
+    struct Concert{
+        address concertOwner;
+        string concertName;
+        string singerName;
+        uint256 startSaleTime;
+        uint256 endSaleTime;
+        Area [] area;
+    }
 
-    struct Spectator {
-        address _address;
-        uint256 id;
-        uint256 amount;
-        string[] ticketLeavel;
+    struct Area{ 
+        string areaName;
+        uint256 seats; 
+        uint256 price;
+    }
+
+    struct Audience {
+        address audienceAddress;
+        string credential;  // user credential
+        uint256 concertId;
+        uint256 amount;    
+        uint256 ticketLeavel;  
     }
 
     address[] public activityPool;

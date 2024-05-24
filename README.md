@@ -59,7 +59,7 @@ $ cast <subcommand>
 
 ### Help
 
-```shell
+```dasjilkjdaslk jda8qshell
 $ forge --help
 $ anvil --help
 $ cast --help
