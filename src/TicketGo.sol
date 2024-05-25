@@ -26,19 +26,13 @@ contract TicketGo is Ownable {
     }
 
     struct BuyerInfo {
+        address audienceAddress;
         uint256 concertId;
         string credential;
         string areaName;
         uint256 amount;
     }
 
-    struct Audience {
-        address audienceAddress;
-        string credential; // user credential
-        // mapping(uint256=>uint256) amountOfEachLevel; // level=>amount
-        string areaName;
-        uint256 amount;
-    }
 
     event EventAddConctract(uint256 indexed concertId, Concert conert);
     event EventAudienceBuyInfo(address indexed audienceAddress, BuyerInfo buyerInfo);
@@ -155,6 +149,7 @@ contract TicketGo is Ownable {
         (bool isBought, ) = isPurchase(_concertId, _credential, _areaName);
         require(!isBought, "You already bought");
         BuyerInfo memory buyerinfo = BuyerInfo({
+            audienceAddress:msg.sender,
             concertId: _concertId,
             credential: _credential,
             areaName: _areaName,
