@@ -9,7 +9,8 @@ contract TicketGo {
     address public _operator;
     // address public _ticketProvider;
     uint256 private concertId;
-    mapping(uint256 => Concert) concertList; 
+    mapping(uint256 concertId=> Concert) concertList; 
+    mapping (uint256 concertId=> bool) isOnSale;
     struct Concert {
         address concertOwner;
         string concertName;
@@ -65,6 +66,7 @@ contract TicketGo {
             area: _area
         });
         concertList[currentConcertId] = currentConcert;
+        isOnSale[currentConcertId] = false;
         emit EventAddConctract(currentConcertId, currentConcert);
     }
 
