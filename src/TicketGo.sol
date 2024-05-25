@@ -33,19 +33,27 @@ contract TicketGo is Ownable {
         uint256 amount;
     }
 
-
     event EventAddConctract(uint256 indexed concertId, Concert conert);
-    event EventAudienceBuyInfo(address indexed audienceAddress, BuyerInfo buyerInfo);
+    event EventAudienceBuyInfo(
+        address indexed audienceAddress,
+        BuyerInfo buyerInfo
+    );
     event EventConcertBought(
         uint256 indexed concertId,
         string indexed areaName,
         address audienceAddress
     );
 
-    event EventAudienceCanceled(address indexed audienceAddress, BuyerInfo buyerInfo);
-    event EvenetConcertCancelBought(uint256 indexed concertId,
+    event EventAudienceCanceled(
+        address indexed audienceAddress,
+        BuyerInfo buyerInfo
+    );
+    event EvenetConcertCancelBought(
+        uint256 indexed concertId,
         string indexed areaName,
-        address audienceAddress);
+        address audienceAddress
+    );
+
     /**
      * Network: Sepolia
      * Aggregator: ETH/USD
@@ -149,7 +157,7 @@ contract TicketGo is Ownable {
         (bool isBought, ) = isPurchase(_concertId, _credential, _areaName);
         require(!isBought, "You already bought");
         BuyerInfo memory buyerinfo = BuyerInfo({
-            audienceAddress:msg.sender,
+            audienceAddress: msg.sender,
             concertId: _concertId,
             credential: _credential,
             areaName: _areaName,
@@ -173,9 +181,16 @@ contract TicketGo is Ownable {
             block.timestamp <= concertList[_concertId].endSaleTime,
             "Sale ends"
         );
-        (bool isBought, uint256 boughtIndex) = isPurchase(_concertId, _credential, _areaName);
-        require(isBought,"You have not bought");
-        emit EventAudienceCanceled(msg.sender, audiencePurchaseInfo[msg.sender][boughtIndex]);
+        (bool isBought, uint256 boughtIndex) = isPurchase(
+            _concertId,
+            _credential,
+            _areaName
+        );
+        require(isBought, "You have not bought");
+        emit EventAudienceCanceled(
+            msg.sender,
+            audiencePurchaseInfo[msg.sender][boughtIndex]
+        );
         deleteAudiencePurchaseInfo(boughtIndex);
         emit EvenetConcertCancelBought(_concertId, _areaName, msg.sender);
     }
@@ -184,7 +199,7 @@ contract TicketGo is Ownable {
         uint256 _concertId,
         string memory _credential,
         string memory _areaName
-    ) internal view returns (bool,uint256) {
+    ) internal view returns (bool, uint256) {
         BuyerInfo[] memory buyerinfos = audiencePurchaseInfo[msg.sender];
         uint256 boughtIndex;
         bool isBought;
@@ -203,11 +218,13 @@ contract TicketGo is Ownable {
         return (isBought, boughtIndex);
     }
 
-    function deleteAudiencePurchaseInfo(uint256 boughtIndex)internal {
-        BuyerInfo storage buyerinfo = audiencePurchaseInfo[msg.sender][boughtIndex];
+    function deleteAudiencePurchaseInfo(uint256 boughtIndex) internal {
+        BuyerInfo storage buyerinfo = audiencePurchaseInfo[msg.sender][
+            boughtIndex
+        ];
         uint256 buyerinfoLength = audiencePurchaseInfo[msg.sender].length;
-        buyerinfo = audiencePurchaseInfo[msg.sender][buyerinfoLength-1];
-        delete audiencePurchaseInfo[msg.sender][buyerinfoLength-1];
+        buyerinfo = audiencePurchaseInfo[msg.sender][buyerinfoLength - 1];
+        delete audiencePurchaseInfo[msg.sender][buyerinfoLength - 1];
     }
 
     // get leatest price ETH/USD
@@ -215,12 +232,11 @@ contract TicketGo is Ownable {
         (
             ,
             /* uint80 roundID */
-            int256 answer, /*uint startedAt*/ /*uint timeStamp*/
+            int256 answer, /*uint startedAt*/ /*uint timeStamp*/ /*uint80 answeredInRound*/
             ,
             ,
 
-        ) = /*uint80 answeredInRound*/
-            dataFeed.latestRoundData();
+        ) = dataFeed.latestRoundData();
         return answer;
     }
 }
