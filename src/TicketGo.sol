@@ -9,7 +9,6 @@ contract TicketGo is Ownable {
     address public _operator;
     uint256 private concertId;
     mapping(uint256 => Concert) concertList;
-    mapping(uint256 => bool) isOnSale;
     mapping(address => BuyerInfo[]) audiencePurchaseInfo;
     struct Concert {
         address concertOwner;
@@ -42,13 +41,17 @@ contract TicketGo is Ownable {
     }
 
     event EventAddConctract(uint256 indexed concertId, Concert conert);
-    event EventBuyerInfo(address indexed audienceAddress, BuyerInfo buyerInfo);
+    event EventAudienceBuyInfo(address indexed audienceAddress, BuyerInfo buyerInfo);
     event EventConcertBought(
         uint256 indexed concertId,
         string indexed areaName,
         address audienceAddress
     );
 
+    event EventAudienceCanceled(address indexed audienceAddress, BuyerInfo buyerInfo);
+    event EvenetConcertCancelBought(uint256 indexed concertId,
+        string indexed areaName,
+        address audienceAddress);
     /**
      * Network: Sepolia
      * Aggregator: ETH/USD
@@ -91,7 +94,6 @@ contract TicketGo is Ownable {
         for (uint256 i = 0; i < _areas.length; i++) {
             currentConcert.areas.push(_areas[i]);
         }
-        isOnSale[currentConcertId] = false;
         emit EventAddConctract(currentConcertId, currentConcert);
     }
 
@@ -99,9 +101,9 @@ contract TicketGo is Ownable {
         return concertId++;
     }
 
-    function alterIsOnSale(uint256 _concertId) external onlyOwner {
-        isOnSale[_concertId] = true;
-    }
+    // function alterIsOnSale(uint256 _concertId) external onlyOwner {
+    //     isOnSale[_concertId] = true;
+    // }
 
     function isExistAreaName(uint256 _concertId, string memory _areaName)
         internal
@@ -123,7 +125,6 @@ contract TicketGo is Ownable {
         }
         return (isExist, areaIndex);
     }
- 
 
     /**
      * @dev The user calls this function to paurchase tickets.
@@ -133,17 +134,26 @@ contract TicketGo is Ownable {
         string memory _credential,
         string memory _areaName
     ) external payable {
-        require(isOnSale[_concertId] == true, "this conert dose not on sale");
+        require(
+            concertList[_concertId].startSaleTime <= block.timestamp,
+            "Sale not start"
+        );
+        require(
+            block.timestamp <= concertList[_concertId].endSaleTime,
+            "Sale ends"
+        );
         (bool isExist, uint256 areaIndex) = isExistAreaName(
             _concertId,
             _areaName
         );
         require(isExist, "Area dosen't exist");
         require(
-            concertList[concertId].areas[areaIndex].price <= msg.value*uint256(getChainlinkDataFeedLatestAnswer())/1e8,
+            concertList[concertId].areas[areaIndex].price <=
+                (msg.value * uint256(getChainlinkDataFeedLatestAnswer())) / 1e8,
             "Not Enough Amount"
         );
-
+        (bool isBought, ) = isPurchase(_concertId, _credential, _areaName);
+        require(!isBought, "You already bought");
         BuyerInfo memory buyerinfo = BuyerInfo({
             concertId: _concertId,
             credential: _credential,
@@ -151,7 +161,7 @@ contract TicketGo is Ownable {
             amount: msg.value
         });
         audiencePurchaseInfo[msg.sender].push(buyerinfo);
-        emit EventBuyerInfo(msg.sender, buyerinfo);
+        emit EventAudienceBuyInfo(msg.sender, buyerinfo);
         emit EventConcertBought(_concertId, _areaName, msg.sender);
     }
 
@@ -160,7 +170,49 @@ contract TicketGo is Ownable {
         string memory _credential,
         string memory _areaName
     ) external {
+        require(
+            concertList[_concertId].startSaleTime <= block.timestamp,
+            "Sale not start"
+        );
+        require(
+            block.timestamp <= concertList[_concertId].endSaleTime,
+            "Sale ends"
+        );
+        (bool isBought, uint256 boughtIndex) = isPurchase(_concertId, _credential, _areaName);
+        require(isBought,"You have not bought");
+        emit EventAudienceCanceled(msg.sender, audiencePurchaseInfo[msg.sender][boughtIndex]);
+        deleteAudiencePurchaseInfo(boughtIndex);
+        emit EvenetConcertCancelBought(_concertId, _areaName, msg.sender);
+    }
 
+    function isPurchase(
+        uint256 _concertId,
+        string memory _credential,
+        string memory _areaName
+    ) internal view returns (bool,uint256) {
+        BuyerInfo[] memory buyerinfos = audiencePurchaseInfo[msg.sender];
+        uint256 boughtIndex;
+        bool isBought;
+        for (uint256 i = 0; i < buyerinfos.length; i++) {
+            if (
+                buyerinfos[i].concertId == _concertId &&
+                keccak256(abi.encodePacked(buyerinfos[i].areaName)) ==
+                keccak256(abi.encodePacked(_areaName)) &&
+                keccak256(abi.encodePacked(buyerinfos[i].credential)) ==
+                keccak256(abi.encodePacked(_credential))
+            ) {
+                isBought = true;
+                boughtIndex = i;
+            }
+        }
+        return (isBought, boughtIndex);
+    }
+
+    function deleteAudiencePurchaseInfo(uint256 boughtIndex)internal {
+        BuyerInfo storage buyerinfo = audiencePurchaseInfo[msg.sender][boughtIndex];
+        uint256 buyerinfoLength = audiencePurchaseInfo[msg.sender].length;
+        buyerinfo = audiencePurchaseInfo[msg.sender][buyerinfoLength-1];
+        delete audiencePurchaseInfo[msg.sender][buyerinfoLength-1];
     }
 
     // get leatest price ETH/USD
@@ -168,13 +220,11 @@ contract TicketGo is Ownable {
         (
             ,
             /* uint80 roundID */
-            int256 answer,
+            int256 answer, /*uint startedAt*/ /*uint timeStamp*/
             ,
             ,
 
-        ) = /*uint startedAt*/
-            /*uint timeStamp*/
-            /*uint80 answeredInRound*/
+        ) = /*uint80 answeredInRound*/
             dataFeed.latestRoundData();
         return answer;
     }
