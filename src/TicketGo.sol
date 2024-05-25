@@ -1,41 +1,39 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-import {AggregatorV3Interface} from "foundry-chainlink-toolkit/src/interfaces/feeds/AggregatorV3Interface.sol";
+// import {AggregatorV3Interface} from "foundry-chainlink-toolkit/src/interfaces/feeds/AggregatorV3Interface.sol";
 
 contract TicketGo {
-    AggregatorV3Interface internal dataFeed;
+    // AggregatorV3Interface internal dataFeed;
 
     address public _operator;
     // address public _ticketProvider;
-    Concert[] ConcertList;  
-    mapping(uint256 conertId=>uint256 amount) balancesOfConcert;  // conertId=>
-    uint256 private conertId;  // unique Id of conert
-    mapping(uint256=>Concert) concertIdOf;  // query conert info using concertId
-    struct Concert{
+    uint256 private concertId;
+    mapping(uint256 => Concert) concertList; 
+    struct Concert {
         address concertOwner;
         string concertName;
         string singerName;
         uint256 startSaleTime;
         uint256 endSaleTime;
-        Area [] area;
+        Area[] area;
     }
 
-    struct Area{ 
+    struct Area {
         string areaName;
-        uint256 seats; 
+        uint256 seats;
         uint256 price;
     }
 
     struct Audience {
         address audienceAddress;
-        string credential;  // user credential
-        uint256 concertId;
-        uint256 amount;    
-        uint256 ticketLeavel;  
+        string credential; // user credential
+        // mapping(uint256=>uint256) amountOfEachLevel; // level=>amount
+        uint256 level;
+        uint256 amount;
     }
 
-    address[] public activityPool;
+    event EventAddConctract(uint256 concertId, Concert conert);
 
     /**
      * Network: Sepolia
@@ -43,21 +41,57 @@ contract TicketGo {
      * Address: 0x694AA1769357215DE4FAC081bf1f309aDC325306
      */
     constructor() {
-        dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        // dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
     }
 
-    // get leatest price ETH/USD
-    function getChainlinkDataFeedLatestAnswer() public view returns (int256) {
-        (
-            /* uint80 roundID */
-            ,
-            int256 answer,
-            /*uint startedAt*/
-            ,
-            /*uint timeStamp*/
-            ,
-            /*uint80 answeredInRound*/
-        ) = dataFeed.latestRoundData();
-        return answer;
+    function addConcert(
+        string memory _concertName,
+        string memory _singerName,
+        uint256 _startSaleTtime,
+        uint256 _endSaleTime,
+        Area[] memory _area
+    ) external {
+
+        require(bytes(_concertName).length!=0, "conertName can not be null");
+        require(bytes(_singerName).length!=0, "singerName can not be null");
+        require(_endSaleTime>=_startSaleTtime,"endSaleTime must be greate than startSaleTime");
+        uint256 currentConcertId = useConcertId();
+        Concert memory currentConcert = Concert({
+            concertOwner: msg.sender,
+            concertName: _concertName,
+            singerName: _singerName,
+            startSaleTime: _startSaleTtime,
+            endSaleTime: _endSaleTime,
+            area: _area
+        });
+        concertList[currentConcertId] = currentConcert;
+        emit EventAddConctract(currentConcertId, currentConcert);
     }
+
+    function useConcertId() internal returns (uint256) {
+        return concertId++;
+    }
+
+    function concertOf(uint256 _concertId)
+        public
+        view
+        returns (Concert memory)
+    {
+        return concertList[_concertId];
+    }
+
+    // // get leatest price ETH/USD
+    // function getChainlinkDataFeedLatestAnswer() public view returns (int256) {
+    //     (
+    //         /* uint80 roundID */
+    //         ,
+    //         int256 answer,
+    //         /*uint startedAt*/
+    //         ,
+    //         /*uint timeStamp*/
+    //         ,
+    //         /*uint80 answeredInRound*/
+    //     ) = dataFeed.latestRoundData();
+    //     return answer;
+    // }
 }
