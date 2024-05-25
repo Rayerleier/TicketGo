@@ -140,7 +140,7 @@ contract TicketGo is Ownable {
         );
         require(isExist, "Area dosen't exist");
         require(
-            concertList[concertId].areas[areaIndex].price <= msg.value,
+            concertList[concertId].areas[areaIndex].price <= msg.value*uint256(getChainlinkDataFeedLatestAnswer())/1e8,
             "Not Enough Amount"
         );
 
