@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 contract TicketGo is Ownable {
     AggregatorV3Interface internal _dataFeed;
 
+    address private _operator;
     address public immutable nftToken;
     uint256 public concertId;
     mapping(uint256 => Concert) public concertList;
@@ -62,8 +63,9 @@ contract TicketGo is Ownable {
      * Address: 0x694AA1769357215DE4FAC081bf1f309aDC325306
      */
     constructor(address _nftToken) Ownable(msg.sender) {
+        _operator = msg.sender;
         nftToken = _nftToken;
-        dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        _dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
     }
 
     function concertOf(uint256 _concertId) public view returns (Concert memory) {
@@ -135,7 +137,8 @@ contract TicketGo is Ownable {
             concertId: _concertId,
             credential: _credential,
             areaName: _areaName,
-            amount: msg.value
+            amount: msg.value,
+            winning: false
         });
         audiencePurchaseInfo[msg.sender].push(buyerinfo);
         emit EventAudienceBuyInfo(msg.sender, buyerinfo);
@@ -180,7 +183,7 @@ contract TicketGo is Ownable {
         delete audiencePurchaseInfo[msg.sender][buyerinfoLength - 1];
     }
 
-    function dispense(BuyerInfo[] buyerList) public {
+    function dispense(BuyerInfo[] memory buyerList) public {
         for (uint256 i = 0; i < buyerList.length; i++) {
             nftToken.mint(
                 buyerList[i].audienceAddress, buyerList[i].concertId, buyerList[i].credential, buyerList[i].areaName
@@ -189,12 +192,16 @@ contract TicketGo is Ownable {
         }
     }
 
-    function refund(BuyerInfo[] buyerList) public payable {
+    function singleRefund(BuyerInfo memory buyerInfo) internal payable {
+        uint256 refundAmount = buyerInfo.amount;
+        buyerInfo.amount = 0;
+        payable(buyerInfo.audienceAddress).call{value: refundAmount}("");
+        emit EventRefund(buyerInfo.audienceAddress, buyerInfo);
+    }
+
+    function refund(BuyerInfo[] memory buyerList) public payable {
         for (uint256 i = 0; i < buyerList.length; i++) {
-            uint256 refundAmount = buyerList[i].amount;
-            buyerList[i].amount = 0;
-            payable(buyerList[i].audienceAddress).call{value: refundAmount}("");
-            emit EventRefund(buyerList[i].audienceAddress, buyerList[i]);
+            singleRefund(buyerList[i]);
         }
     }
 
@@ -208,9 +215,9 @@ contract TicketGo is Ownable {
         uint256 operatorAmount = totalBalance * 0.1;
 
         payable(singerAddress).call{value: singerAmount}("");
-        payable(_owner).call{value: operatorAmount}("");
+        payable(_operator).call{value: operatorAmount}("");
 
-        emit EventWithdraw(_concertId, singerAddress, singerAmount, _owner, operatorAmount);
+        emit EventWithdraw(_concertId, singerAddress, singerAmount, _operator, operatorAmount);
     }
 
     // get leatest price ETH/USD
