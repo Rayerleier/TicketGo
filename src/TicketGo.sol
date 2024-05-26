@@ -109,9 +109,7 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
     ) Ownable(msg.sender) VRFConsumerBaseV2(vrfCoordinatorV2) {
         _operator = msg.sender;
         nftToken = _nftToken;
-        _dataFeed = AggregatorV3Interface(
-            0x694AA1769357215DE4FAC081bf1f309aDC325306
-        );
+        // _dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
         i_vrfCoordinator = VRFCoordinatorV2Interface(vrfCoordinatorV2);
     }
 
@@ -186,16 +184,12 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
             block.timestamp <= concertList[_concertId].endSaleTime,
             "Sale ends"
         );
-        (bool isExist, uint256 areaIndex) = _isExistAreaName(
-            _concertId,
-            _areaName
-        );
-        require(isExist, "Area doesn't exist");
-        require(
-            concertList[_concertId].areas[areaIndex].price <=
-                (msg.value * uint256(getChainlinkDataFeedLatestAnswer())) / 1e8,
-            "Not Enough Amount"
-        );
+        // (bool isExist, uint256 areaIndex) = _isExistAreaName(_concertId, _areaName);
+        // require(isExist, "Area doesn't exist");
+        // require(
+        //     concertList[_concertId].areas[areaIndex].price <= (msg.value * uint256(getChainlinkDataFeedLatestAnswer())) / 1e8,
+        //     "Not Enough Amount"
+        // );
         (bool isBought, ) = _isPurchase(_concertId, _credential, _areaName);
         require(!isBought, "You already bought");
         BuyerInfo memory buyerInfo = BuyerInfo({
@@ -512,8 +506,8 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
         return result;
     }
 
-    function getChainlinkDataFeedLatestAnswer() public view returns (int256) {
-        (, int256 answer, , , ) = _dataFeed.latestRoundData();
-        return answer;
-    }
+    // function getChainlinkDataFeedLatestAnswer() public view returns (int256) {
+    //     (, int256 answer, , , ) = _dataFeed.latestRoundData();
+    //     return answer;
+    // }
 }
