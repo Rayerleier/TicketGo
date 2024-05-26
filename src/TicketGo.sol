@@ -6,6 +6,7 @@ import {VRFCoordinatorV2Interface} from "@chainlink/contracts/src/v0.8/interface
 import {VRFConsumerBaseV2} from "@chainlink/contracts/src/v0.8/vrf/VRFConsumerBaseV2.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+// import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "./NFT.sol";
 
 contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{    
@@ -18,6 +19,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
 
     AggregatorV3Interface internal _dataFeed;
 
+    address private _operator;
     address public immutable nftToken;
     uint8 private withdrawPercent = 9
     uint256 public concertId;
@@ -94,12 +96,11 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
      * Address: 0x694AA1769357215DE4FAC081bf1f309aDC325306
      */
     constructor(address vrfCoordinatorV2, uint256 _nftToken) Ownable(msg.sender) VRFConsumerBaseV2(vrfCoordinatorV2){
-        _operator = msg.sender;
         nftToken = _nftToken;
-        _dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
         i_vrfCoordinator = VRFCoordinatorV2Interface(vrfCoordinatorV2);
 
-   }
+    }
 
     function concertOf(uint256 _concertId) public view returns (Concert memory) {
         return concertList[_concertId];
@@ -239,39 +240,43 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
         _deleteBooking(buyerinfo);
     }
 
-    function dispense(BuyerInfo[] buyerList) public {
+    function dispense(BuyerInfo[] memory buyerList) public {
         for (uint256 i = 0; i < buyerList.length; i++) {
-            nftToken.mint(
+            TicketGoNFT(nftToken).mint(
                 buyerList[i].audienceAddress, buyerList[i].concertId, buyerList[i].credential, buyerList[i].areaName
             );
             emit EventDispense(buyerList[i].audienceAddress, buyerList[i]);
         }
     }
-    // function refundSingleBuy(BuyerInfo buyerInfo) public payable{
-        
-    // }
-    function refund(BuyerInfo[] buyerList) public payable {
+
+function singleRefund(BuyerInfo memory buyerInfo) public payable {
+        uint256 refundAmount = buyerInfo.amount;
+        buyerInfo.amount = 0;
+        (bool success,) = payable(buyerInfo.audienceAddress).call{value: refundAmount}("");
+        emit EventRefund(buyerInfo.audienceAddress, success, buyerInfo);
+    }
+
+    function refund(BuyerInfo[] memory buyerList) public payable {
         for (uint256 i = 0; i < buyerList.length; i++) {
-            uint256 refundAmount = buyerList[i].amount;
-            buyerList[i].amount = 0;
-            payable(buyerList[i].audienceAddress).call{value: refundAmount}("");
-            emit EventRefund(buyerList[i].audienceAddress, buyerList[i]);
+            singleRefund(buyerList[i]);
         }
     }
 
     // Final amount settlement
     function withdraw(uint256 _concertId) public payable onlyOwner {
-        Concert storage concertInfo = concertOf(_concertId);
+        Concert memory concertInfo = concertOf(_concertId);
         address singerAddress = concertInfo.concertOwner;
         uint256 totalBalance = concertInfo.totalBalance;
         concertInfo.totalBalance = 0;
-        uint256 singerAmount = totalBalance * 0.9;
-        uint256 operatorAmount = totalBalance * 0.1;
+        uint256 singerAmount = (totalBalance * 90) / 100;
+        uint256 operatorAmount = (totalBalance * 10) / 100;
 
-        payable(singerAddress).call{value: singerAmount}("");
-        payable(_owner).call{value: operatorAmount}("");
+        (bool singerSuccess,) = payable(singerAddress).call{value: singerAmount}("");
+        (bool operatorSuccess,) = payable(_operator).call{value: operatorAmount}("");
 
-        emit EventWithdraw(_concertId, singerAddress, singerAmount, _owner, operatorAmount);
+        emit EventWithdraw(
+            _concertId, singerSuccess, singerAddress, singerAmount, operatorSuccess, _operator, operatorAmount
+        );
     }
 
 // --------------------------- Chainlink ---------------------

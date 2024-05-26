@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.25;
+pragma solidity ^0.8.25;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
-contract MyNFT is ERC721 {
+interface ITicketGoNFT {
+    function mint(address _address, uint256 concertId, string memory credential, string memory areaName)
+        external
+        returns (bytes32);
+}
+
+contract TicketGoNFT is ERC721, ITicketGoNFT {
     uint256 public tokenIds = 1;
 
     constructor() ERC721("TicketGo", "TG") {}
@@ -12,11 +18,6 @@ contract MyNFT is ERC721 {
         public
         returns (bytes32)
     {
-        // address audienceAddress;
-        // uint256 concertId;
-        // string credential;
-        // string areaName;
-
         uint256 newItemId = tokenIds;
         _mint(_address, newItemId);
         tokenIds++;
@@ -26,7 +27,7 @@ contract MyNFT is ERC721 {
         return hash;
     }
 
-    function transferFrom(address from, address to, uint256 tokenId) public override {}
+    function transferFrom(address from, address to, uint256 tokenId) public virtual override {}
 
-    function safeTransferFrom(address from, address to, uint256 tokenId) public override {}
+    function safeTransferFrom(address from, address to, uint256 tokenId, bytes memory data) public virtual override {}
 }
