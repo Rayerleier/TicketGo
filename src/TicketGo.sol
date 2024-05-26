@@ -3,10 +3,11 @@ pragma solidity ^0.8.25;
 import {AggregatorV3Interface} from "@chainlink/contracts@1.1.0/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {VRFCoordinatorV2Interface} from "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import {VRFConsumerBaseV2} from "@chainlink/contracts/src/v0.8/vrf/VRFConsumerBaseV2.sol";
+import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
-contract TicketGo is Ownable VRFConsumerBaseV2{    
+contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{    
     // Chainlink VRF Variables
     VRFCoordinatorV2Interface private immutable i_vrfCoordinator;
     uint64 private immutable i_subscriptionId;
@@ -17,10 +18,20 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
     AggregatorV3Interface internal _dataFeed;
 
     address public immutable nftToken;
-
+    uint8 private withdrawPercent = 9
     uint256 public concertId;
     mapping(uint256 => Concert) public concertList;
     mapping(address => BuyerInfo[]) public audiencePurchaseInfo;
+    // {
+    //     concertID: {areaName: [BuyerInfo]}
+    // }
+    mapping(uint256 => mapping(string => BuyerInfo[])) bookingPool;
+    // bookingPoolMap helper
+    // {
+    //     concertID: {areaName: {userAddr: buyerAreaIndex}}
+    // }
+    mapping(uint256 => mapping(string => mapping(address => uint256))) bookingAreaPoolIndex;
+
     struct Concert {
         address concertOwner;
         string concertName;
@@ -30,6 +41,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
         uint256 showTime;
         uint256 totalBalance;
         Area[] areas;
+        bool withdrawed;
     }
 
     struct Area {
@@ -144,6 +156,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
                 <= (msg.value * uint256(getChainlinkDataFeedLatestAnswer())) / 1e8,
             "Not Enough Amount"
         );
+        require(bookingAreaPoolIndex[_concertId][_areaName] == 0, "Already booking this Area")
         (bool isBought,) = _isPurchase(_concertId, _credential, _areaName);
         require(!isBought, "You already bought");
         BuyerInfo memory buyerinfo = BuyerInfo({
@@ -154,7 +167,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
             amount: msg.value
         });
         audiencePurchaseInfo[msg.sender].push(buyerinfo);
-        bookingPool
+        _addBooking(buyerinfo);
         emit EventAudienceBuyInfo(msg.sender, buyerinfo);
         emit EventConcertBought(_concertId, _areaName, msg.sender);
     }
@@ -167,6 +180,25 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
         emit EventAudienceCanceled(msg.sender, audiencePurchaseInfo[msg.sender][boughtIndex]);
         _deleteAudiencePurchaseInfo(boughtIndex);
         emit EvenetConcertCancelBought(_concertId, _areaName, msg.sender);
+    }
+
+    function _addBooking(BuyerInfo buyerInfo) internal{
+        uint256 cid = buyerinfo.concerId;
+        string aname = buyerinfo.areaName;
+
+        bookingPool[cid][aname].push(buyerinfo);
+        uint256 buyerAreaIndex = bookingPool[cid][aname].length;
+        bookingAreaPoolIndex[cid][aname][msg.sender] = buyerAreaIndex;
+    }
+    function _deleteBooking(BuyerInfo buyerinfo) internal{
+        uint256 cid = buyerinfo.concerId;
+        string aname = buyerinfo.areaName;
+
+        uint256 buyerAreaIndex = bookingAreaPoolIndex[cid][aname][msg.sender] - 1;
+
+        delete bookingPool[cid][aname][buyerAreaIndex];
+        delete bookingAreaPoolIndex[cid][aname][msg.sender];
+
     }
 
     function _isPurchase(uint256 _concertId, string memory _credential, string memory _areaName)
@@ -195,6 +227,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
         uint256 buyerinfoLength = audiencePurchaseInfo[msg.sender].length;
         buyerinfo = audiencePurchaseInfo[msg.sender][buyerinfoLength - 1];
         delete audiencePurchaseInfo[msg.sender][buyerinfoLength - 1];
+        _deleteBooking(buyerinfo);
     }
 
     function dispense(BuyerInfo[] buyerList) public {
@@ -205,7 +238,9 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
             emit EventDispense(buyerList[i].audienceAddress, buyerList[i]);
         }
     }
-
+    // function refundSingleBuy(BuyerInfo buyerInfo) public payable{
+        
+    // }
     function refund(BuyerInfo[] buyerList) public payable {
         for (uint256 i = 0; i < buyerList.length; i++) {
             uint256 refundAmount = buyerList[i].amount;
@@ -236,10 +271,39 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
     // so we choice the final luck user at fix datetime.
     // it's a tradeoff solution
     function autoTrigger(uint8 concertId) external{
-        Concert concert = concertList[_concertId];
+        checkBookPoolSelect();
+        checkSingerWithdraw();
+        
+    }
+
+    function checkBookPool(){
+        for(uint i = 0; i < concertId; i++){
+            concert = concertList[i]
+            if (concert.startSaleTime < block.timestamp && concert.endSaleTime > block.timestamp){
+                bookPoolSelect(concert)
+            }
+            bool singerWithdrawTimeCheck = concert.showTime + 3 > block.timestamp
+            bool singerWithdrawStatusCheck = concert.withdrawed == false
+            if (singerWithdrawTimeCheck && singerWithdrawStatusCheck){
+                withdraw(concerId)
+            }
+        }
+
+    }
+    // function singerWithdraw(Concert concert) internal payable{
+    //     uint256 withdrawAmount = concert.totalBalance * withdrawPercent/10
+    //     payable(concert.concertOwner).call{value: withdrawAmount}("");
+    //     emit EventWithdraw(
+    //         concert.concerId, 
+    //         concert.concertOwner,
+    //         withdrawAmount,
+
+    //         )
+    // }
+
+    function bookPoolSelect(Concert concert) internal{
         uint8 randomWordsCount = concert.Area.length()
 
-        s_raffleState = RaffleState.CALCULATING;
         uint256 requestId = i_vrfCoordinator.requestRandomWords(
             i_gasLane,
             i_subscriptionId,
@@ -248,8 +312,8 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
             randomWordsCount
         );
         emit RequestedConcertRandomWord(requestId);
-    }
 
+    }
     /**
      * @dev This is the function that Chainlink VRF node
      * calls choice final booking.
@@ -258,18 +322,12 @@ contract TicketGo is Ownable VRFConsumerBaseV2{
         uint256 /* requestId */,
         uint256[] memory randomWords
     ) internal override {
-        mapping(concertID>mapping(string areaName>BuyerInfo[]) bookingMap
-        // {
-        //     "Area1": [{booking.userAddr}],
-        //     "Area2": [{booking.userAddr}],
-        //     "Area3": [{booking.userAddr}]
 
-        // }
         for(uint i = 0; i < concert.Area.length; i++){
             areaRandomWord = randomWords[i]
             area = concert.Area[i]
 
-            areaBookings = bookingMap[area.areaName]
+            areaBookings = bookingPool[concerId][area.areaName]
             selectedAreaBookingIndexList = selectBookingForSingleArea(areaBookings, areaRandomWord)
             emit AreaBookingSelected{}
         }
