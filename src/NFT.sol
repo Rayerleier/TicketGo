@@ -3,7 +3,13 @@ pragma solidity ^0.8.25;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
-contract TicketGoNFT is ERC721 {
+interface ITicketGoNFT {
+    function mint(address _address, uint256 concertId, string memory credential, string memory areaName)
+        external
+        returns (bytes32);
+}
+
+contract TicketGoNFT is ERC721, ITicketGoNFT {
     uint256 public tokenIds = 1;
 
     constructor() ERC721("TicketGo", "TG") {}
