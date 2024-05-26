@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 // import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "./NFT.sol";
 
-contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{    
+contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface{    
     // Chainlink VRF Variables
     VRFCoordinatorV2Interface private immutable i_vrfCoordinator;
     uint64 private immutable i_subscriptionId;
@@ -21,7 +21,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
 
     address private _operator;
     address public immutable nftToken;
-    uint8 private withdrawPercent = 9
+    uint8 private withdrawPercent = 9;
     uint256 public concertId;
 
     mapping(uint256 => Concert) public concertList;
@@ -38,9 +38,10 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
     // {
     //     concertID: {areaName: {userAddr: buyerAreaIndex}}
     // }
-    mapping(uint256 => mapping(string => mapping(address => uint256))) bookingAreaPoolIndex;
-
+    mapping(uint256 => mapping(string => mapping(address => uint256))) internal bookingAreaPoolIndex;
+    mapping(uint256 => uint256) internal vrfRequestParamMap;
     struct Concert {
+        uint256 concertId;
         address concertOwner;
         string concertName;
         string singerName;
@@ -95,9 +96,10 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
      * Aggregator: ETH/USD
      * Address: 0x694AA1769357215DE4FAC081bf1f309aDC325306
      */
-    constructor(address vrfCoordinatorV2, uint256 _nftToken) Ownable(msg.sender) VRFConsumerBaseV2(vrfCoordinatorV2){
+    constructor(address vrfCoordinatorV2, address _nftToken) Ownable(msg.sender) VRFConsumerBaseV2(vrfCoordinatorV2){
+        _operator = msg.sender;
         nftToken = _nftToken;
-        dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        _dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
         i_vrfCoordinator = VRFCoordinatorV2Interface(vrfCoordinatorV2);
 
     }
@@ -119,6 +121,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
 
         uint256 currentConcertId = _useConcertId();
         Concert storage currentConcert = concertList[currentConcertId];
+        currentConcert.concertId = currentConcertId;
         currentConcert.concertOwner = msg.sender;
         currentConcert.concertName = _concertName;
         currentConcert.singerName = _singerName;
@@ -165,7 +168,7 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
                 <= (msg.value * uint256(getChainlinkDataFeedLatestAnswer())) / 1e8,
             "Not Enough Amount"
         );
-        require(bookingAreaPoolIndex[_concertId][_areaName] == 0, "Already booking this Area")
+        // require(0 == bookingAreaPoolIndex[_concertId][_areaName], "Already booking this Area");
         (bool isBought,) = _isPurchase(_concertId, _credential, _areaName);
         require(!isBought, "You already bought");
         BuyerInfo memory buyerinfo = BuyerInfo({
@@ -192,17 +195,17 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
         emit EvenetConcertCancelBought(_concertId, _areaName, msg.sender);
     }
 
-    function _addBooking(BuyerInfo buyerInfo) internal{
-        uint256 cid = buyerinfo.concerId;
-        string aname = buyerinfo.areaName;
+    function _addBooking(BuyerInfo memory buyerInfo) internal{
+        uint256 cid = buyerInfo.concertId;
+        string memory aname = buyerInfo.areaName;
 
-        bookingPool[cid][aname].push(buyerinfo);
+        bookingPool[cid][aname].push(buyerInfo);
         uint256 buyerAreaIndex = bookingPool[cid][aname].length;
         bookingAreaPoolIndex[cid][aname][msg.sender] = buyerAreaIndex;
     }
-    function _deleteBooking(BuyerInfo buyerinfo) internal{
-        uint256 cid = buyerinfo.concerId;
-        string aname = buyerinfo.areaName;
+    function _deleteBooking(BuyerInfo storage buyerinfo) internal{
+        uint256 cid = buyerinfo.concertId;
+        string memory aname = buyerinfo.areaName;
 
         uint256 buyerAreaIndex = bookingAreaPoolIndex[cid][aname][msg.sender] - 1;
 
@@ -239,164 +242,6 @@ contract TicketGo is Ownable VRFConsumerBaseV2 AutomationCompatibleInterface{
         delete audiencePurchaseInfo[msg.sender][buyerinfoLength - 1];
         _deleteBooking(buyerinfo);
     }
-
-    function dispense(BuyerInfo[] memory buyerList) public {
-        for (uint256 i = 0; i < buyerList.length; i++) {
-            TicketGoNFT(nftToken).mint(
-                buyerList[i].audienceAddress, buyerList[i].concertId, buyerList[i].credential, buyerList[i].areaName
-            );
-            emit EventDispense(buyerList[i].audienceAddress, buyerList[i]);
-        }
-    }
-
-function singleRefund(BuyerInfo memory buyerInfo) public payable {
-        uint256 refundAmount = buyerInfo.amount;
-        buyerInfo.amount = 0;
-        (bool success,) = payable(buyerInfo.audienceAddress).call{value: refundAmount}("");
-        emit EventRefund(buyerInfo.audienceAddress, success, buyerInfo);
-    }
-
-    function refund(BuyerInfo[] memory buyerList) public payable {
-        for (uint256 i = 0; i < buyerList.length; i++) {
-            singleRefund(buyerList[i]);
-        }
-    }
-
-    // Final amount settlement
-    function withdraw(uint256 _concertId) public payable onlyOwner {
-        Concert memory concertInfo = concertOf(_concertId);
-        address singerAddress = concertInfo.concertOwner;
-        uint256 totalBalance = concertInfo.totalBalance;
-        concertInfo.totalBalance = 0;
-        uint256 singerAmount = (totalBalance * 90) / 100;
-        uint256 operatorAmount = (totalBalance * 10) / 100;
-
-        (bool singerSuccess,) = payable(singerAddress).call{value: singerAmount}("");
-        (bool operatorSuccess,) = payable(_operator).call{value: operatorAmount}("");
-
-        emit EventWithdraw(
-            _concertId, singerSuccess, singerAddress, singerAmount, operatorSuccess, _operator, operatorAmount
-        );
-    }
-
-// --------------------------- Chainlink ---------------------
-    // this function should be call by Automation.
-    // we can call it with a fixed Automation schedule, eg 00:00:00
-    // so we choice the final luck user at fix datetime.
-    // it's a tradeoff solution
-    function performUpkeep(bytes calldata /* performData */) external override {
-        checkBookPool();
-    }
-
-    function checkBookPool() internal {
-        for(uint i = 0; i < concertID; i++){
-            Concert concert = concertList[i];
-            if (concert.startSaleTime < block.timestamp && concert.endSaleTime > block.timestamp){
-                bookPoolSelect(concert);
-            }
-            bool singerWithdrawTimeCheck = concert.showTime + 3 > block.timestamp;
-            bool singerWithdrawStatusCheck = concert.withdrawed == false;
-            if (singerWithdrawTimeCheck && singerWithdrawStatusCheck){
-                withdraw(i);
-            }
-        }
-    }
-
-    function bookPoolSelect(Concert concert) internal{
-        uint8 randomWordsCount = concert.Area.length;
-
-        uint256 requestId = i_vrfCoordinator.requestRandomWords(
-            i_gasLane,
-            i_subscriptionId,
-            REQUEST_CONFIRMATIONS,
-            i_callbackGasLimit,
-            randomWordsCount // request same number as areas, use for draw in each area pool
-        );
-        vrfRequestParamMap[requestId] = concert.concerId;
-    }
-    /**
-     * @dev This is the function that Chainlink VRF node
-     * calls choice final booking.
-     */
-    function fulfillRandomWords(
-        uint256 requestId ,
-        uint256[] memory randomWords
-    ) internal override {
-        uint256 _concertId = vrfRequestParamMap[requestId];
-        Concert concert = concertList[_concerId];
-        (BuyerInfo[] fortuneBuys, BuyerInfo[] unfortuneBuys) = drawConcert(concert, randomWords);
-        processDrawResult(fortuneBuys, unfortuneBuys);
-    } 
-
-    function processDrawResult(BuyerInfo[] fortuneBuys, BuyerInfo[] unfortuneBuys) internal {
-        generateNFT(fortuneBuys);
-        refund(unfortuneBuys);
-    }
-
-    function drawConcert(Concert concert, uint[] randomWrods
-    ) internal returns (BuyerInfo[], BuyerInfo[]){
-        BuyerInfo[] c_fortuneBuys;
-        BuyerInfo[] c_unfortuneBuys;
-
-        for(uint i = 0; i < concert.Area.length; i++){
-            randomWord = randomWords[i];
-            Area area = concert.Area[i];
-            BuyerInfo[] areaPool = bookingPool[concerId][area.areaName];
-            (BuyerInfo[] fortuneBuys, BuyerInfo[] unfortuneBuys) = drawForAreaPool(areaPool, area.seats, randomWord);
-            // concat all buyInfo of
-            for(uint i = 0; i < fortuneBuys.length; i++){
-                c_fortuneBuys.push(fortuneBuys[i]);
-            }
-            for(uint i = 0; i < unfortuneBuys.length; i++){
-                c_unfortuneBuys.push(unfortuneBuys[i]);
-            }
-            // for(uint i = c_fortuneBuys.length; i < c_fortuneBuys.length + fortuneBuys.length; i++){
-            //     c_fortuneBuys[i] = fortuneBuys;
-            // }
-            // for(uint i = c_unfortuneBuys.length; i < c_unfortuneBuys.length + unfortuneBuys.length; i++){
-            //     c_unfortuneBuys[i] = fortuneBuys;
-            // }
-
-        }
-
-        return (c_fortuneBuys, c_unfortuneBuys);
-    }
-    
-    function drawForAreaPool(
-        BuyerInfo[] areaPool,  uint256 avaiableNum, uint256 _seed
-    ) internal returns(BuyerInfo[], BuyerInfo[]) {
-
-        BuyerInfo[] fortuneBuys;
-        BuyerInfo[] unfortuneBuys;
-
-        uint256[] selectedIndexList = drawAreaPoolIndex(areaPool.length, avaiableNum, _seed);
-        for(uint areaIdx = 0; areaIdx < areaPool.length; areaIdx++){
-            bool selected = false;
-            for(uint selectedIdx = 0; j < selectedIdxList.length; selectedIdx++){
-                if (areaIdx == selectedIdx){
-                    selected = true;
-                    break;
-                }
-            }
-            if (selected){
-                fortuneBuys.push(areaPool[areaIdx]);
-            } else {
-                unfortuneBuys.push(areaPool[areaIdx]);
-            }
-        return (fortuneBuys, unfortuneBuys);
-    }
-
-    function drawAreaPoolIndex(uint256 totalNum, uint256 avaiableNum, uint256 _seed) internal returns (uint256[]){
-        uint256 seed = _seed;
-        uint256[] memory selectedIdxList = new uint256[];
-        while (i < avaiableNum){
-            idx = seed % avaiableNum;
-            selectedIdxList[i] = idx;
-            seed = (_a * seed + _c) % _m;
-        }
-        return selectedIdxList
-    }
-
     function dispense(BuyerInfo[] memory buyerList) public {
         for (uint256 i = 0; i < buyerList.length; i++) {
             TicketGoNFT(nftToken).mint(
@@ -434,6 +279,121 @@ function singleRefund(BuyerInfo memory buyerInfo) public payable {
         emit EventWithdraw(
             _concertId, singerSuccess, singerAddress, singerAmount, operatorSuccess, _operator, operatorAmount
         );
+    }
+
+// --------------------------- Chainlink ---------------------
+    // this function should be call by Automation.
+    // we can call it with a fixed Automation schedule, eg 00:00:00
+    // so we choice the final luck user at fix datetime.
+    // it's a tradeoff solution
+    function checkUpkeep(bytes calldata checkData) external returns (bool upkeepNeeded, bytes memory performData){
+        return (true, "0x0");
+    }
+
+    function performUpkeep(bytes calldata /* performData */) external override {
+        checkBookPool();
+    }
+    function checkBookPool() internal {
+        for(uint i = 0; i < concertId; i++){
+            Concert storage concert = concertList[i];
+            if (concert.startSaleTime < block.timestamp && concert.endSaleTime > block.timestamp){
+                bookPoolSelect(concert);
+            }
+            bool singerWithdrawTimeCheck = concert.showTime + 3 > block.timestamp;
+            bool singerWithdrawStatusCheck = concert.withdrawed == false;
+            if (singerWithdrawTimeCheck && singerWithdrawStatusCheck){
+                withdraw(i);
+            }
+        }
+    }
+
+    function bookPoolSelect(Concert memory concert) internal{
+        uint32 randomWordsCount = uint32(concert.areas.length);
+
+        uint256 requestId = i_vrfCoordinator.requestRandomWords(
+            i_gasLane,
+            i_subscriptionId,
+            REQUEST_CONFIRMATIONS,
+            i_callbackGasLimit,
+            randomWordsCount // request same number as areas, use for draw in each area pool
+        );
+        vrfRequestParamMap[requestId] = concert.concertId;
+    }
+    /**
+     * @dev This is the function that Chainlink VRF node
+     * calls choice final booking.
+     */
+    function fulfillRandomWords(
+        uint256 requestId ,
+        uint256[] memory randomWords
+    ) internal override {
+        uint256 _concertId = vrfRequestParamMap[requestId];
+        Concert storage concert = concertList[_concertId];
+        (BuyerInfo[] memory fortuneBuys, BuyerInfo[] memory unfortuneBuys) = drawConcert(concert, randomWords);
+        processDrawResult(fortuneBuys, unfortuneBuys);
+    } 
+
+    function processDrawResult(BuyerInfo[] memory fortuneBuys, BuyerInfo[] memory unfortuneBuys) internal {
+        // generateNFT(fortuneBuys);
+        refund(unfortuneBuys);
+    }
+
+    function drawConcert(Concert storage concert, uint[] memory randomWords
+    ) internal returns (BuyerInfo[] memory, BuyerInfo[] memory){
+        BuyerInfo[] storage c_fortuneBuys;
+        BuyerInfo[] storage c_unfortuneBuys;
+
+        for(uint i = 0; i < concert.areas.length; i++){
+            uint256 randomWord = randomWords[i];
+            Area memory area = concert.areas[i];
+            BuyerInfo[] memory areaPool = bookingPool[concertId][area.areaName];
+            (BuyerInfo[] memory fortuneBuys, BuyerInfo[] memory unfortuneBuys) = drawForAreaPool(areaPool, area.seats, randomWord);
+            // concat all buyInfo of
+            for(uint256 _i = 0; _i < fortuneBuys.length; _i++){
+                c_fortuneBuys.push(fortuneBuys[_i]);
+            }
+            for(uint _j = 0; _j < unfortuneBuys.length; _j++){
+                c_unfortuneBuys.push(unfortuneBuys[_j]);
+            }
+        }
+
+        return (c_fortuneBuys, c_unfortuneBuys);
+    }
+    
+    function drawForAreaPool(
+        BuyerInfo[] memory areaPool,  uint256 avaiableNum, uint256 _seed
+    ) internal returns(BuyerInfo[]memory , BuyerInfo[]memory ) {
+
+        BuyerInfo[] storage fortuneBuys;
+        BuyerInfo[] storage unfortuneBuys;
+
+        uint256[] memory selectedIndexList = drawAreaPoolIndex(areaPool.length, avaiableNum, _seed);
+        for(uint areaIdx = 0; areaIdx < areaPool.length; areaIdx++) {
+            bool selected = false;
+            for(uint256 selectedIdx = 0; selectedIdx < selectedIndexList.length; selectedIdx++){
+                if (areaIdx == selectedIdx){
+                    selected = true;
+                    break;
+                }
+            }
+            if (selected){
+                fortuneBuys.push(areaPool[areaIdx]);
+            } else {
+                unfortuneBuys.push(areaPool[areaIdx]);
+            }
+        }
+        return (fortuneBuys, unfortuneBuys);
+    }
+
+    function drawAreaPoolIndex(uint256 totalNum, uint256 avaiableNum, uint256 _seed) internal returns (uint256[] storage){
+        uint256 seed = _seed;
+        uint256[] storage selectedIdxList(totalNum);
+       for (uint256 i =0; i < avaiableNum; i++){
+            uint256 idx = seed % avaiableNum;
+            selectedIdxList.push(idx);
+            seed = (_a * seed + _c) % _m;
+        }
+        return selectedIdxList;
     }
 
     // get leatest price ETH/USD
