@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import {AggregatorV3Interface} from "@chainlink/contracts@1.1.0/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import {VRFCoordinatorV2Interface} from "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
-import {VRFConsumerBaseV2} from "@chainlink/contracts/src/v0.8/vrf/VRFConsumerBaseV2.sol";
-import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/v0.8/interfaces/AggregatorV3Interface.sol";
+import {VRFCoordinatorV2Interface} from "@chainlink/contracts/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
+import {VRFConsumerBaseV2} from "@chainlink/contracts/v0.8/vrf/VRFConsumerBaseV2.sol";
+import {AutomationCompatibleInterface} from "@chainlink/contracts/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./NFT.sol";
+import "./interface/ITicketGo.sol";
 
-contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
+contract TicketGo is
+    ITicketGo,
+    Ownable,
+    VRFConsumerBaseV2,
+    AutomationCompatibleInterface
+{
     // Chainlink VRF Variables
     VRFCoordinatorV2Interface private immutable i_vrfCoordinator;
     uint64 private immutable i_subscriptionId;
@@ -25,84 +31,17 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
 
     mapping(uint256 => Concert) public concertList;
     mapping(address => BuyerInfo[]) public audiencePurchaseInfo;
+    mapping(uint256 concertId => mapping(string areaName => mapping(string credential => bool)))
+        public isBought;
     uint256 internal immutable _a = 1664525;
     uint256 internal immutable _c = 1013904223;
     uint256 internal immutable _m = 2 ** 32;
 
-    mapping(uint256 => mapping(string => BuyerInfo[])) bookingPool;
-    mapping(uint256 => mapping(string => mapping(address => uint256)))
+    mapping(uint256 concertId=> mapping(string areaName=> BuyerInfo[])) bookingPool;
+    mapping(uint256 concertId=> mapping(string areaName=> mapping(address buyerAddress=> uint256 buyerAmount)))
         internal bookingAreaPoolIndex;
     mapping(uint256 => uint256) internal vrfRequestParamMap;
-
-    struct Concert {
-        uint256 concertId;
-        address concertOwner;
-        string concertName;
-        string singerName;
-        uint256 startSaleTime;
-        uint256 endSaleTime;
-        uint256 showTime;
-        uint256 totalBalance;
-        Area[] areas;
-        bool withdrawed;
-    }
-
-    struct Area {
-        string areaName;
-        uint256 seats;
-        uint256 price;
-    }
-
-    struct BuyerInfo {
-        address audienceAddress;
-        uint256 concertId;
-        string credential;
-        string areaName;
-        uint256 amount;
-        bool winning;
-    }
-
-    event EventAddConcert(uint256 indexed concertId, Concert concert);
-    event EventAudienceBuyInfo(
-        address indexed audienceAddress,
-        BuyerInfo buyerInfo
-    );
-    event EventConcertBought(
-        uint256 indexed concertId,
-        string indexed areaName,
-        address audienceAddress
-    );
-    event EventAudienceCanceled(
-        address indexed audienceAddress,
-        BuyerInfo buyerInfo
-    );
-    event AreaBookingSelected(
-        uint256 indexed concertId,
-        string concertName,
-        uint256[] selectedBookingAddress
-    );
-    event ConcertSelected(uint256 indexed concertId);
-    event EventConcertCancelBought(
-        uint256 indexed concertId,
-        string indexed areaName,
-        address audienceAddress
-    );
-    event EventDispense(address indexed audienceAddress, BuyerInfo buyerInfo);
-    event EventRefund(
-        address indexed audienceAddress,
-        bool isSuccessFul,
-        BuyerInfo buyerInfo
-    );
-    event EventWithdraw(
-        uint256 indexed concertId,
-        bool singerSuccess,
-        address singerAddress,
-        uint256 singerAmount,
-        bool operatorSuccess,
-        address operatorAddress,
-        uint256 operatorAmount
-    );
-
+    
     constructor(
         address vrfCoordinatorV2,
         address _nftToken
@@ -119,11 +58,18 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
         return concertList[_concertId];
     }
 
+    function audienceOf(
+        address audience
+    ) public view returns (BuyerInfo[] memory) {
+        return audiencePurchaseInfo[audience];
+    }
+
     function addConcert(
         string memory _concertName,
         string memory _singerName,
         uint256 _startSaleTime,
         uint256 _endSaleTime,
+        uint256 _showTime,
         Area[] memory _areas
     ) external {
         require(bytes(_concertName).length != 0, "concertName cannot be null");
@@ -132,6 +78,11 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
             _endSaleTime >= _startSaleTime,
             "endSaleTime must be greater than startSaleTime"
         );
+        require(
+            _showTime >= _endSaleTime,
+            "showTime must be greater than endSaleTime"
+        );
+        require(_areas.length != 0, "area cannot be null");
 
         uint256 currentConcertId = _useConcertId();
         Concert storage currentConcert = concertList[currentConcertId];
@@ -141,6 +92,7 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
         currentConcert.singerName = _singerName;
         currentConcert.startSaleTime = _startSaleTime;
         currentConcert.endSaleTime = _endSaleTime;
+        currentConcert.showTime = _showTime;
         for (uint256 i = 0; i < _areas.length; i++) {
             currentConcert.areas.push(_areas[i]);
         }
@@ -184,14 +136,21 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
             block.timestamp <= concertList[_concertId].endSaleTime,
             "Sale ends"
         );
-        // (bool isExist, uint256 areaIndex) = _isExistAreaName(_concertId, _areaName);
-        // require(isExist, "Area doesn't exist");
+        (bool isExist, uint256 areaIndex) = _isExistAreaName(
+            _concertId,
+            _areaName
+        );
+        require(isExist, "Area doesn't exist");
+        require(concertList[_concertId].areas[areaIndex].price <= msg.value);
         // require(
-        //     concertList[_concertId].areas[areaIndex].price <= (msg.value * uint256(getChainlinkDataFeedLatestAnswer())) / 1e8,
+        //     concertList[_concertId].areas[areaIndex].price <=
+        //         (msg.value * uint256(getChainlinkDataFeedLatestAnswer())) / 1e8,
         //     "Not Enough Amount"
         // );
-        (bool isBought, ) = _isPurchase(_concertId, _credential, _areaName);
-        require(!isBought, "You already bought");
+        require(
+            !isBought[_concertId][_areaName][_credential],
+            "You already bought"
+        );
         BuyerInfo memory buyerInfo = BuyerInfo({
             audienceAddress: msg.sender,
             concertId: _concertId,
@@ -202,6 +161,8 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
         });
         audiencePurchaseInfo[msg.sender].push(buyerInfo);
         _addBooking(buyerInfo);
+        isBought[_concertId][_areaName][_credential] = true;
+
         emit EventAudienceBuyInfo(msg.sender, buyerInfo);
         emit EventConcertBought(_concertId, _areaName, msg.sender);
     }
@@ -219,29 +180,34 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
             block.timestamp <= concertList[_concertId].endSaleTime,
             "Sale ends"
         );
-        (bool isBought, uint256 boughtIndex) = _isPurchase(
+        require(
+            isBought[_concertId][_areaName][_credential],
+            "You have not bought"
+        );
+        (bool isBuyerAccount,uint256 boughtIndex )= _findBoughtIndex(
             _concertId,
             _credential,
             _areaName
         );
-        require(isBought, "You have not bought");
+        require(isBuyerAccount, "You cannot cancel other's purchase");
         emit EventAudienceCanceled(
             msg.sender,
             audiencePurchaseInfo[msg.sender][boughtIndex]
         );
         _deleteAudiencePurchaseInfo(boughtIndex);
+        isBought[_concertId][_areaName][_credential] = false;
         emit EventConcertCancelBought(_concertId, _areaName, msg.sender);
     }
 
     function _addBooking(BuyerInfo memory buyerInfo) internal {
-        uint256 cid = buyerInfo.concertId;
-        string memory aname = buyerInfo.areaName;
-        bookingPool[cid][aname].push(buyerInfo);
-        uint256 buyerAreaIndex = bookingPool[cid][aname].length - 1;
-        bookingAreaPoolIndex[cid][aname][msg.sender] = buyerAreaIndex;
+        uint256 concertId_ = buyerInfo.concertId;
+        string memory areaName_ = buyerInfo.areaName;
+        bookingPool[concertId_][areaName_].push(buyerInfo);
+        uint256 buyerAreaIndex = bookingPool[concertId_][areaName_].length - 1;
+        bookingAreaPoolIndex[concertId_][areaName_][msg.sender] = buyerAreaIndex;
     }
 
-    function _deleteBooking(BuyerInfo storage buyerInfo) internal {
+    function _deleteBooking(BuyerInfo memory buyerInfo) internal {
         uint256 cid = buyerInfo.concertId;
         string memory aname = buyerInfo.areaName;
         uint256 buyerAreaIndex = bookingAreaPoolIndex[cid][aname][msg.sender];
@@ -253,14 +219,14 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
         delete bookingAreaPoolIndex[cid][aname][msg.sender];
     }
 
-    function _isPurchase(
+    function _findBoughtIndex(
         uint256 _concertId,
         string memory _credential,
         string memory _areaName
-    ) internal view returns (bool, uint256) {
+    ) internal view returns (bool,uint256) {
         BuyerInfo[] memory buyerInfos = audiencePurchaseInfo[msg.sender];
         uint256 boughtIndex;
-        bool isBought;
+        bool isBuyerAccount = false;
         for (uint256 i = 0; i < buyerInfos.length; i++) {
             if (
                 buyerInfos[i].concertId == _concertId &&
@@ -269,15 +235,17 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
                 keccak256(abi.encodePacked(buyerInfos[i].credential)) ==
                 keccak256(abi.encodePacked(_credential))
             ) {
-                isBought = true;
+                if(msg.sender == buyerInfos[i].audienceAddress){
+                    isBuyerAccount = true;
+                }
                 boughtIndex = i;
             }
         }
-        return (isBought, boughtIndex);
+        return (isBuyerAccount,boughtIndex);
     }
 
     function _deleteAudiencePurchaseInfo(uint256 boughtIndex) internal {
-        BuyerInfo storage buyerInfo = audiencePurchaseInfo[msg.sender][
+        BuyerInfo memory buyerInfo = audiencePurchaseInfo[msg.sender][
             boughtIndex
         ];
         uint256 lastIndex = audiencePurchaseInfo[msg.sender].length - 1;
@@ -286,7 +254,7 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
                 boughtIndex
             ] = audiencePurchaseInfo[msg.sender][lastIndex];
         }
-        audiencePurchaseInfo[msg.sender].pop();
+        delete audiencePurchaseInfo[msg.sender][lastIndex];
         _deleteBooking(buyerInfo);
     }
 
@@ -343,6 +311,7 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
         );
     }
 
+    // https://ms-python.gallerycdn.azure.cn/extensions/ms-python/vscode-pylance/2024.5.1/1715021455303/Microsoft.VisualStudio.Services.Icons.Default
     function checkUpkeep(
         bytes calldata /* checkData */
     )
@@ -506,8 +475,8 @@ contract TicketGo is Ownable, VRFConsumerBaseV2, AutomationCompatibleInterface {
         return result;
     }
 
-    // function getChainlinkDataFeedLatestAnswer() public view returns (int256) {
-    //     (, int256 answer, , , ) = _dataFeed.latestRoundData();
-    //     return answer;
-    // }
+    function getChainlinkDataFeedLatestAnswer() public view returns (int256) {
+        (, int256 answer, , , ) = _dataFeed.latestRoundData();
+        return answer;
+    }
 }
